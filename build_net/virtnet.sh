@@ -16,7 +16,7 @@ function create_nodes(){
 	idx=0
 
 	for h in ${nodes[@]}; do
-		docker create --cap-add NET_ADMIN --name $h -p ${port_cast[$idx]}:${port_cast[$(($idx+1))]} mycontainer:v1.3
+		docker create --cap-add NET_ADMIN --name $h -p ${port_cast[$idx]}:${port_cast[$(($idx+1))]}  --mount type=bind,source=/root/Project/virtinc,target=/root/virtinc mycontainer:v1.3
 		idx=$(($idx+2))
 		echo create $h
 	done
@@ -46,7 +46,7 @@ function destroy_containers()
 
 function destroy_images()
 {
-	docker rmi mycontainer:v1.0
+	docker rmi mycontainer:v1.3
 }
 
 function create_links(){
@@ -63,17 +63,24 @@ function create_links(){
 	id[3]=${id[1]}
 
  	total=${#links[*]}
+	# A类地址
 	ipAddr=("10.0.0.1/24" "10.0.0.2/24" "10.0.1.1/24" "10.0.1.2/24")
 	idx=0
 
 	for ((i=0; i<$total; i=i+4)) do
-		#echo ${links[$i]}, ${links[$i+1]}, ${links[$i+2]}, ${links[$i+3]}
+		echo ${links[$i]}, ${links[$i+1]}, ${links[$i+2]}, ${links[$i+3]}
+
+		#ip link add * type veth peer name * 增设两个相互连接的网卡
 		ip link add ${links[$i]}-${links[$i+1]} type veth peer name ${links[$i+2]}-${links[$i+3]}
 
+		#ip link set  在网络内安装
 		ip link set ${links[$i]}-${links[$i+1]} netns ${id[$idx]}
+		#ip netns exec NAMESPACE COMMAND  在网络命名空间执行		 
 		ip netns exec ${id[$idx]} ip link set ${links[$i]}-${links[$i+1]} up
 		ip netns exec ${id[$idx]} ip addr add ${ipAddr[$idx]} dev ${links[$i]}-${links[$i+1]}
+		#网卡设备增设ip 地址
 		idx=$(($idx+1))
+
 
 		ip link set ${links[$i+2]}-${links[$i+3]} netns ${id[$idx]}
 		ip netns exec ${id[$idx]} ip link set ${links[$i+2]}-${links[$i+3]} up
@@ -87,6 +94,7 @@ function destroy_links(){
 	ip link del host1-iface1
 	ip link del host2-iface1
 	
+	id=()
 	for((i=0;i<3;i++));
 	do
 		id[$i]=$(sudo docker inspect -f '{{.State.Pid}}' ${nodes[$i]})
@@ -94,8 +102,29 @@ function destroy_links(){
 	done
 }
 
+function ping_links(){
+	#"10.0.0.2/24" 和 "10.0.1.2/24" 是switch的
+	ipAddr=("10.0.0.1" "10.0.0.2" "10.0.1.1" "10.0.1.2")
 
+	for((i=0;i<3;i++));
+	do	
+		id[$i]=$(sudo docker inspect -f '{{.State.Pid}}' ${nodes[$i]})
+	done
+
+	ip netns exec ${id[0]} ping ${ipAddr[1]}
+	ip netns exec ${id[2]} ping ${ipAddr[3]}
+
+	ip netns exec ${id[1]} ping ${ipAddr[0]}
+	ip netns exec ${id[1]} ping ${ipAddr[2]}
+}
 
 #create_images
-create_nodes
+#create_nodes
+#run_containers
 create_links
+#ping_links
+
+
+#destroy_links
+#destroy_containers
+#destroy_images

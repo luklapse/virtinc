@@ -1,10 +1,11 @@
-# Base images 基础镜像
-FROM ubuntu:20.04
+# Base images 基础镜像 
+FROM ubuntu:18.04 
+#由于tzdata 20.04.1的bug改用18.04
 
 #RUN 执行以下命令 
-RUN apt-get update && apt-get install sudo -y && sudo apt-get install vim \
-    iproute2 traceroute autoconf make gcc libpcap-dev \
-    openssh-server openssh-client ssh -y
+RUN apt-get update \
+&& apt-get install -y sudo \
+&& apt-get install -y vim iproute2 traceroute autoconf make g++ libpcap-dev
 
-#CMD 运行以下命令
+#查看
 CMD tail -f /dev/null
