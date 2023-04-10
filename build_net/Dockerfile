@@ -5,7 +5,7 @@ FROM ubuntu:18.04
 #RUN 执行以下命令 
 RUN apt-get update \
 && apt-get install -y sudo \
-&& apt-get install -y vim iproute2 traceroute autoconf make g++ libpcap-dev
+&& apt-get install -y vim iproute2 traceroute autoconf g++ libpcap-dev gdb
 
 #查看
 CMD tail -f /dev/null

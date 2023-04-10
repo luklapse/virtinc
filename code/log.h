@@ -60,7 +60,7 @@ private:
 
     public:
         Logwork(Log *obj) { ptr = obj; }
-        void operator()()
+        void operator()() //线程工作 为何用内部类，不可以直接用内联函数吗？
         {
             std::unique_lock lk(ptr->logmutex_);
             while (ptr->isOpen_)
@@ -149,8 +149,8 @@ public:
         if (filefd_ > 0)
             close(filefd_);
     }
-    void Init(int level, int buflen = 1000000, std::string path = "./log")
-    {
+    void Init(int level, int buflen = (1>>20), std::string path = "./log")
+    {   //1MB
         if (isOpen_)
             shutdown();
         isOpen_ = true;

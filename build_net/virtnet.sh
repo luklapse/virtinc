@@ -16,7 +16,8 @@ function create_nodes(){
 	idx=0
 
 	for h in ${nodes[@]}; do
-		docker create --cap-add NET_ADMIN --name $h -p ${port_cast[$idx]}:${port_cast[$(($idx+1))]}  --mount type=bind,source=/root/Project/virtinc,target=/root/virtinc mycontainer:v1.3
+		docker create --cap-add NET_ADMIN --name $h -p ${port_cast[$idx]}:${port_cast[$(($idx+1))]}  \
+--mount type=bind,source=/root/Project/virtinct,target=/root/Project/virtinct --security-opt seccomp=unconfined mycontainer:v1.3
 		idx=$(($idx+2))
 		echo create $h
 	done
@@ -53,6 +54,9 @@ function create_links(){
 	echo "======================================"
 	echo "create links"
 
+	#创建/var/run/netns文件夹很可能很不存在
+	mkdir /var/run/netns
+
 	id=()
 	for((i=0;i<3;i++));
 	do
@@ -73,7 +77,7 @@ function create_links(){
 		#ip link add * type veth peer name * 增设两个相互连接的网卡
 		ip link add ${links[$i]}-${links[$i+1]} type veth peer name ${links[$i+2]}-${links[$i+3]}
 
-		#ip link set  在网络内安装
+		#1. ip link set  在网络内安装
 		ip link set ${links[$i]}-${links[$i+1]} netns ${id[$idx]}
 		#ip netns exec NAMESPACE COMMAND  在网络命名空间执行		 
 		ip netns exec ${id[$idx]} ip link set ${links[$i]}-${links[$i+1]} up
@@ -81,7 +85,7 @@ function create_links(){
 		#网卡设备增设ip 地址
 		idx=$(($idx+1))
 
-
+		#同上1
 		ip link set ${links[$i+2]}-${links[$i+3]} netns ${id[$idx]}
 		ip netns exec ${id[$idx]} ip link set ${links[$i+2]}-${links[$i+3]} up
 		ip netns exec ${id[$idx]} ip addr add ${ipAddr[$idx]} dev ${links[$i+2]}-${links[$i+3]}
@@ -122,7 +126,7 @@ function ping_links(){
 #create_nodes
 #run_containers
 create_links
-#ping_links
+ping_links
 
 
 #destroy_links

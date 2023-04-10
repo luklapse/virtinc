@@ -1,2 +1,2 @@
-main:receive.cpp
-	g++ -o  main receive.cpp  -lpcap -I.
+main:
+	g++ main.cpp -o demo -lpcap -pthread

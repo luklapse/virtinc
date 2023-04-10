@@ -47,7 +47,7 @@ public:
         }
         capacity_=size;
     }
-    void reserve(int size) //capacity_，容器至少比size，并非是size
+    void reserve(int size) //capacity_，容器至少比size大，并非是size
     {                  
         if (capacity_ > size)
             return;
@@ -113,24 +113,6 @@ public:
             return true;
         }
         return false;
-    }
-    int ReadFd(int fd)
-    {
-        int len = read(fd, end(), leftsize());
-        if (len > 0)
-        {
-            resize(size_ + len);
-        }
-        return len;
-    }
-    int WriteFd(int fd)
-    {
-        int len = write(fd, Peek(), peekleft());
-        if (len >0)
-        {
-            peek_ += len;
-        }
-        return len;
     }
     int peekleft(){
        return size_ - peek_;
