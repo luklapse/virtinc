@@ -3,11 +3,13 @@
 #define _NET_H_
 #include <stdint.h>
 #include <iostream>
+#include <chrono>
 #include <pcap/pcap.h>
 #include "buff.h"
 #include "safequeue.h"
 
-#define MTU 1500                      // 数据帧最大字节
+using namespace std::chrono;
+#define MTU 150                      // 数据帧最大字节
 #define MSS MTU - sizeof(ip_header_t) // 避免ip分片，实际这个数据是由三次握手确定
 
 #define INCP_DATA 0
@@ -15,7 +17,7 @@
 
 #define MAX_WND_SIZE 512
 
-#define MAX_BUFFSIZE 1 << 20
+#define MAX_BUFFSIZE 100
 // 0 ~ MAX_CON_NUM-1 代表了套字节
 #define MAX_CON_NUM 100
 /*******************************************************************************
@@ -67,11 +69,11 @@ struct ip_packet
     char data[MSS];
     ip_packet()
     {
-        memset(&ip_head, 0, sizeof(ip_packet));
+        memset(&ip_head, 0, sizeof(ip_head));
         memset(&incp_head, 0, sizeof(incp_head));
         memset(data, 0, sizeof(data));
     };
-    void operator=(ip_packet &other)
+    void operator=(const ip_packet &other)
     {
         memcpy(this, &other, sizeof(ip_packet));
     }
@@ -144,9 +146,10 @@ struct _conn_t
 };
 
 struct _send_state
-{
+{ //TODO 每个套字节自己一个状态，目前由于应用场景没有多连接都是一对一先不做了
     ip_packet send_window[MAX_WND_SIZE * 2];
     bool ack_window[MAX_WND_SIZE * 2];
+    time_point<steady_clock> send_time[MAX_WND_SIZE * 2];
 
     CircularBuffer buff;
 
@@ -156,16 +159,15 @@ struct _send_state
     ThreadSafeQueue<_task> tasks;
 
     int last_seq_of_current_task;
-    struct _task *current_task;
+    struct _task current_task;
 
     _send_state() : buff(MAX_BUFFSIZE)
     {
         memset(ack_window, 0, sizeof(ack_window));
-        last_sent = 0; // seq从1开始
-        last_acked = 0;
+        last_sent = -1; // seq从0开始
+        last_acked = -1;
 
         last_seq_of_current_task = -2;
-        current_task = nullptr;
     }
 };
 
@@ -176,9 +178,9 @@ struct _recv_state // TODO ack_window也算到recv_window里
 
     CircularBuffer buff;
 
-    _recv_state() : buff(MAX_BUFFSIZE / 10)
+    _recv_state() : buff(MAX_BUFFSIZE/10)
     {
-        ack_until = -1;
+        ack_until =-1;
     }
     void close()
     {

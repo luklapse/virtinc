@@ -17,18 +17,24 @@ public:
       // FIX 关于满和空的判断，要求length不为0
         if (length <= 0)
             return 0;
+        if (length > kBufferSize_)
+            length = kBufferSize_;
         // mod=0 能写就写一部分
         // mod=1 要写就全能写,保证包的完整
         std::unique_lock<std::mutex> lock(mutex_); // 获取互斥锁
         if (mod == 0)
         {
-            while (full_)
+            while (full_){
+                printf("buff write full\n");
                 not_full_.wait(lock);
+            }
         }
         else if (mod == 1)
         {
             if (full_)
+            {
                 return 0;
+            }
             else if (head_ <= tail_ && length > kBufferSize_ - (tail_ - head_))
             {
                 return 0;
@@ -41,24 +47,30 @@ public:
         int i = 0;
         while (i < length)
         {
-            if (head_ < tail_ && tail_ + length - i >= kBufferSize_)
+            if (head_ <= tail_)
             { // 复制到环形缓冲区尾部时需要分段处理
-                int len = kBufferSize_ - tail_;
-                memcpy(&buffer_[tail_], &data[i], len);
-                tail_ = 0;
-                i += len;
+                if (tail_ + length - i >= kBufferSize_)
+                {
+                    int len = kBufferSize_ - tail_;
+                    memcpy(&buffer_[tail_], &data[i], len);
+                    tail_ = 0;
+                    i += len;
+                }
+                else
+                {
+                    int len = length - i;
+                    memcpy(&buffer_[tail_], &data[i], len);
+                    tail_ += len;
+                    i += len;
+                }
             }
             else
             { // 要么->tail_ head_->, head_->tail_
-                int len = length - i;
-                if (tail_ < head_)
-                {
-                    len = std::min(len, head_ - tail_);
-                } // 计算能够写入的最大长度
+                int len = std::min(length - i, head_ - tail_);
                 memcpy(&buffer_[tail_], &data[i], len);
                 tail_ += len;
                 i += len;
-                break;
+                break;//此处要么缓冲区满 要么所有数据都写入
             }
         }
         empty_ = false;
@@ -71,15 +83,20 @@ public:
     {
         if (length <= 0)
             return 0;
+
+        if (length > kBufferSize_)
+            length = kBufferSize_;
         std::unique_lock<std::mutex> lock(mutex_); // 获取互斥锁
-        // if()
-        while (empty_)
+
+        while (empty_){
+            printf("buff read empty\n");
             not_empty_.wait(lock);
+        }
 
         int i = 0;
         while (i < length)
         {
-            if (tail_ < head_ && head_ + length - i >= kBufferSize_)
+            if (tail_ <=head_ && head_ + length - i >= kBufferSize_)
             { // 复制到环形缓冲区尾部时需要分段处理
                 int len = kBufferSize_ - head_;
                 memcpy(&data[i], &buffer_[head_], len);

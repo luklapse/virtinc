@@ -20,7 +20,7 @@ public:
     void work()
     {
         send_thread = std::thread(&ATP::run_send, this);
-        //recv_thread = std::thread(&ATP::run_recv, this);
+        recv_thread = std::thread(&ATP::run_recv, this);
     }
     void stop()
     {
@@ -55,9 +55,9 @@ public:
             socket_map.insert({_conn_t(conn_id, src_ip, dst_ip), temp});
             return temp;
         }
-        else if (conn_id = 0) //准备接受这个地址信息
+        else if (conn_id == 0) // 准备接受这个地址信息
         {
-            for (int i = 1; i <=MAX_CON_NUM; i++)
+            for (int i = 1; i <= MAX_CON_NUM; i++)
             {
                 if (conn_t[i].conn_id == -1)
                 {
@@ -82,26 +82,24 @@ public:
             socket_map.erase(ans);
     }
 
-    int send(int socket, char *addr, unsigned int size)
+    int send(int socket,const char *addr, unsigned int size)
     { // 阻塞的端口设计。
         int ans = 0;
         while (ans < size)
         { // 对很大发送数据分割为多次发送任务。
-            ans += send_state.buff.Write(addr + ans, size - ans);
-            std::cout<<"send task emplace"<<std::endl;
-            send_state.tasks.emplace(socket, size);
+            int temp=send_state.buff.Write(addr + ans, size - ans);
+            ans += temp;
+            std::cout << "send task emplace" << std::endl;
+            send_state.tasks.emplace(socket, temp);
         }
         return size;
     }
 
     int recv(int socket, char *addr, unsigned int size)
     { // 构建recv_state
-        // TODO 阻塞接口等待接受到信息，接受到足够的信息，除非断开连接
+        // 非阻塞接口等待接受到信息，接受到足够的信息，除非断开连接
         int ans = 0;
-        while (ans < size)
-        {
-            ans += recv_state[socket].buff.Read(addr, size);
-        }
+        ans = recv_state[socket].buff.Read(addr, size);
         // 接受数据 发送ack，边接受边回应
         return ans;
     }
@@ -123,33 +121,36 @@ private:
     _recv_state recv_state[MAX_CON_NUM];
 
     // socket->conn_t
-    _conn_t conn_t[MAX_CON_NUM+1];
+    _conn_t conn_t[MAX_CON_NUM + 1];
     // conn_t->socket，内部是安全的，但对接口不是线程安全的
     std::map<_conn_t, int> socket_map;
     void run_send()
     {
         std::cout << "run send thread\n";
         // 这里开启一个线程专门用于处理task队列，并且通过线程间通信得到成功返回
-        if (send_state.current_task==nullptr)
-        {
-            send_state.tasks.wait_and_pop(*send_state.current_task);
-            std::cout<<"ini cur_task "<<send_state.current_task->size<<send_state.current_task->socket<<std::endl;
-        }
+
+        send_state.tasks.wait_and_pop(send_state.current_task);
+        std::cout << "get first cur_task " << send_state.current_task.size << std::endl;
         while (true)
         {
-            std::cout << "cur_task....\n";
-            _task *cur_task = send_state.current_task;
+            _task *cur_task = &send_state.current_task;
             int seq = send_state.last_acked + 1;
             // 超时重传的数据,加入缓冲区
             for (; seq <= send_state.last_sent; seq++)
-            { // TODO 需要时间戳的问题 即选择重发没有acked且超时报文
+            {
                 auto tmp_window = seq % (2 * MAX_WND_SIZE);
-                pcap_inject(device, &send_state.send_window[tmp_window], send_state.send_window[tmp_window].ip_head.length);
+                auto now = steady_clock::now();
+                // 500ms && send_state.ack_window[tmp_window] == false
+                if (duration_cast<milliseconds>(send_state.send_time[tmp_window] - now).count() > 100 )
+                {
+                    std::cout << "cur_task timeout resend "<<seq<<'\n';
+                    send_state.send_time[tmp_window] = now;
+                    pcap_inject(device, &send_state.send_window[tmp_window], send_state.send_window[tmp_window].ip_head.length);
+                }
             }
             // 下一步发送的数据
             send_encode_packet(cur_task, seq);
             // 等待回应的ack，更新last_acked
-            // sleep(0.5); 2TT;
             {
                 std::lock_guard<std::mutex> lk(ackwin_lock);
                 for (int i = 0; i < 2 * MAX_WND_SIZE && send_state.ack_window[(send_state.last_acked + 1) % (2 * MAX_WND_SIZE)]; i++)
@@ -160,14 +161,15 @@ private:
             }
             if (send_state.last_acked == send_state.last_seq_of_current_task)
             {
-                send_state.tasks.wait_and_pop(*send_state.current_task);
+                send_state.tasks.wait_and_pop(send_state.current_task);
             }
         }
     }
-    void send_encode_packet(_task *cur_task, int seq)
+    void send_encode_packet(_task *cur_task, int &seq)
     {
         for (; cur_task->size > 0 && seq <= send_state.last_acked + MAX_WND_SIZE * 2; seq++)
         {
+            std::cout << "send encode packet "<<seq<<'\n';
             // 装包
             auto tmp_window = seq % (2 * MAX_WND_SIZE);
 
@@ -196,25 +198,25 @@ private:
             ip_head.ttl = 0x0f;
             ip_head.checksum = 0;
             // 由于send接口写入缓冲区的，正常情况一定存在相应的数据
-            if (send_state.buff.Read(send_state.send_window[tmp_window].data, incp_head.length - sizeof(incp_header_t)) != incp_head.length - sizeof(incp_header_t))
-            {
-                std::cout << "send_buff read error\n";
+            
+            int len=incp_head.length - sizeof(incp_header_t);
+            for(int i=0;i<len;){
+                i+=send_state.buff.Read(send_state.send_window[tmp_window].data+i, len-i);
             }
             // 计算校验码
             ip_head.checksum = compute_checksum(&send_state.send_window[tmp_window], ip_head.length);
             // 发送
+            send_state.send_time[tmp_window] = steady_clock::now();
             pcap_inject(device, &send_state.send_window[tmp_window], send_state.send_window[tmp_window].ip_head.length);
         }
         // TODO 更新send_state状态
         send_state.last_sent = seq - 1;
     }
 
-    void recv_handle(u_char *arg, const struct pcap_pkthdr *pkthdr, const u_char *packet)
+    void recv_handle(const struct pcap_pkthdr *pkthdr, const u_char *packet)
     {
         // 接受的数据到缓冲区
         printf("Received Packet Size: %d\n", pkthdr->len);
-        printf("Payload:\n");
-        std::cout << packet << '\n';
         // 默认为整数个ip片，解析ip片
         recv_pack((ip_packet *)packet);
         return;
@@ -223,13 +225,13 @@ private:
     void run_recv()
     {
         std::cout << "run recv thread\n";
-        std::function<void(u_char *, const struct pcap_pkthdr *, const u_char *)> callback_tmp =
-            std::bind(&ATP::recv_handle, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3);
-        pcap_loop(device, -1, *callback_tmp.target<pcap_handler>(), nullptr);
+        pcap_handler callback = (pcap_handler)&ATP::recv_handle;
+        pcap_loop(device, -1, callback, (u_char *)this);
     }
 
     void respond_ack(ip_packet *cur_packet)
     {
+        
         ip_packet ack_packet;
         incp_header_t &incp_head = ack_packet.incp_head;
         incp_head.type = INCP_ACK;
@@ -247,47 +249,63 @@ private:
 
         ip_head.checksum = compute_checksum(&ack_packet, ip_head.length);
         pcap_inject(device, &ack_packet, ip_head.length);
+        std::cout << "respond ack "<<incp_head.ack_num<<'\n';
     }
     int recv_pack(ip_packet *cur_packet)
     {
         // 处理单个ip_packet包 读入到接受窗口,处理data
-        std::cout<<"recv one packet\n";
-        if (compute_checksum(cur_packet, cur_packet->ip_head.length) == cur_packet->ip_head.checksum)
+
+        uint16_t check = cur_packet->ip_head.checksum;
+        cur_packet->ip_head.checksum = 0;
+        if (compute_checksum(cur_packet, cur_packet->ip_head.length) == check)
         { // 查找对应连接
             int socket;
             auto ans = socket_map.find(_conn_t(cur_packet->incp_head.conn_num, cur_packet->ip_head.dst_ip, cur_packet->ip_head.src_ip));
             if (ans != socket_map.end())
+            {
                 socket = ans->second;
+                std::cout << "socket " << socket << " recv...\n";
+            }
             else
             { // 接受连接
                 socket = accept_conn(cur_packet->incp_head.conn_num, cur_packet->ip_head.dst_ip, cur_packet->ip_head.src_ip);
-                std::cout << "don't establish a connect\n";
-                if(socket==-1) return 0; // 丢弃这个包
+                std::cout << "ready to build a connect\n socket " << socket << std::endl;
+                if (socket == -1)
+                {
+                    std::cout << "don't establish a connect\n";
+                    return 0; // 丢弃这个包
+                }
             }
             _recv_state &cur_recv_state = recv_state[socket];
 
-            if (cur_packet->incp_head.type == 0) // data，接受窗口只处理数据
+            if (cur_packet->incp_head.type == INCP_DATA) // data，接受窗口只处理数据
             {
+                std::cout << "recv one data packet: " << cur_packet->incp_head.seq_num <<" len:"<<cur_packet->ip_head.length<< std::endl;
                 int windows_id = cur_packet->incp_head.seq_num % (2 * MAX_WND_SIZE);
                 if (cur_packet->incp_head.seq_num < cur_recv_state.ack_until + 2 * MAX_WND_SIZE)
                 { // 每个加入窗口的data包 都返回ack
                     cur_recv_state.recv_window[windows_id] = *cur_packet;
                     respond_ack(cur_packet);
-                    // 更新cur_recv_state.ack_until
+                    // 更新cur_recv_state.ack_until,累计确认
                     while (cur_recv_state.recv_window[windows_id].incp_head.seq_num == cur_recv_state.ack_until + 1)
-                    {
-                        if (cur_recv_state.buff.Write(cur_recv_state.recv_window[windows_id].data, cur_recv_state.recv_window[windows_id].incp_head.length - sizeof(incp_header_t), 1) == 0)
-                            break;
+                    { // 必须一次写入如果不够等待可以一次写入。
+                      //TODO 修复
+                        int len = cur_recv_state.recv_window[windows_id].incp_head.length - sizeof(incp_header_t);
+                        for (int i=0;i<len;)
+                        {
+                            i+= cur_recv_state.buff.Write(cur_recv_state.recv_window[windows_id].data+i, len-i);
+                        }
                         cur_recv_state.ack_until += 1;
                         windows_id = (windows_id + 1) % (2 * MAX_WND_SIZE);
                     }
                 }
             }
-            else if (cur_packet->incp_head.type == 1) // ack 更新发送窗口 ，如果任务完成通知另一方
+            else if (cur_packet->incp_head.type == INCP_ACK) // ack 更新发送窗口 ，如果任务完成通知另一方
             {
                 // TODO 确定是此时send_state所对应的任务
+                std::cout << "recv one ack packet: " << cur_packet->incp_head.ack_num << std::endl;
                 std::lock_guard<std::mutex> lk(ackwin_lock);
-                if (send_state.current_task->socket != socket)
+                if (send_state.current_task.socket != socket)
                 {
                     std::cout << "this ack packet don't belong to thecurrent send task\n";
                 }
@@ -298,6 +316,7 @@ private:
         else
         {
             std::cout << "bad packet\n";
+            std::cout << cur_packet->data << '\n';
             abort();
         }
         return cur_packet->ip_head.length;
@@ -310,13 +329,14 @@ private:
         {
             std::cout << errBuf << std::endl;
         }
-        
+
         int ret = pcap_activate(device);
         if (ret != 0)
         {
             std::cout << pcap_geterr(device) << std::endl;
         }
-        else std::cout<<"success open pcap\n";
+        else
+            std::cout << "success open pcap\n";
         return device;
     }
     uint16_t crc16_for_byte(uint16_t r)

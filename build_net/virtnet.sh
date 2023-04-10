@@ -17,7 +17,7 @@ function create_nodes(){
 
 	for h in ${nodes[@]}; do
 		docker create --cap-add NET_ADMIN --name $h -p ${port_cast[$idx]}:${port_cast[$(($idx+1))]}  \
---mount type=bind,source=/root/Project/virtinct,target=/root/Project/virtinct --security-opt seccomp=unconfined mycontainer:v1.3
+--mount type=bind,source=/home/wy/virtinct,target=/root/virtinct --security-opt seccomp=unconfined mycontainer:v1.3
 		idx=$(($idx+2))
 		echo create $h
 	done

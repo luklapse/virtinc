@@ -21,7 +21,7 @@ public:
 
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.emplace(std::forward<Args>(args)...);
-        cond_.notify_one();
+        cond_.notify_all();
     }
 
     void push(const T &value)
@@ -29,7 +29,7 @@ public:
 
         std::lock_guard<std::mutex> lock(mutex_);
         queue_.push(value);
-        cond_.notify_one();
+        cond_.notify_all();
     }
 
     bool try_pop(T &value)

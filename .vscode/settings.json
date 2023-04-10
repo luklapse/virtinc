@@ -1,7 +1,6 @@
 {
     "files.associations": {
         "*.sql": "sql",
-        "vector": "cpp",
         "array": "cpp",
         "atomic": "cpp",
         "bit": "cpp",
@@ -23,6 +22,7 @@
         "deque": "cpp",
         "map": "cpp",
         "unordered_map": "cpp",
+        "vector": "cpp",
         "exception": "cpp",
         "algorithm": "cpp",
         "functional": "cpp",
