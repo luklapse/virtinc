@@ -1,4 +1,4 @@
-#include "src/buff.h"
+#include "../src/buff.h"
 #include <iostream>
 #include <thread>
 using namespace std;

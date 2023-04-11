@@ -4,20 +4,21 @@
 #include <stdint.h>
 #include <iostream>
 #include <chrono>
+#include <atomic>
 #include <pcap/pcap.h>
 #include "buff.h"
 #include "safequeue.h"
 
 using namespace std::chrono;
-#define MTU 150                      // 数据帧最大字节
-#define MSS MTU - sizeof(ip_header_t) // 避免ip分片，实际这个数据是由三次握手确定
+#define MTU 1500                                              // 数据帧最大字节
+#define MSS MTU - sizeof(ip_header_t) - sizeof(incp_header_t) // 避免ip分片，实际这个数据是由三次握手确定
 
 #define INCP_DATA 0
 #define INCP_ACK 1
 
-#define MAX_WND_SIZE 512
+#define MAX_WND_SIZE 256
 
-#define MAX_BUFFSIZE 100
+#define MAX_BUFFSIZE 1 << 20
 // 0 ~ MAX_CON_NUM-1 代表了套字节
 #define MAX_CON_NUM 100
 /*******************************************************************************
@@ -44,9 +45,9 @@ typedef struct __attribute__((packed)) IP_Header
 
 typedef struct __attribute__((packed)) INCP_Header
 {
-    uint8_t type;    // INCP_DATA：0；INCP_ACK：1
-    uint16_t length; // 整个incp数据包长度
-    uint32_t seq_num;
+    uint8_t type;     // INCP_DATA：0；INCP_ACK：1
+    uint16_t length;  // 整个incp数据包长度
+    uint32_t seq_num; // 注意uint和int类型
     uint32_t ack_num;
     uint16_t window_size;
     uint32_t conn_num; // 选取方式自己闲置的套字节
@@ -85,8 +86,8 @@ struct ip_packet
 
 struct _task
 {
-    int socket; // 该任务所代表的连接，也代表是一次完整的数据，我们需要把这个数据分包发送
-    int size;   // 代表需要从send_buff读取的大小
+    uint32_t socket; // 该任务所代表的连接，也代表是一次完整的数据，我们需要把这个数据分包发送
+    uint32_t size;   // 代表需要从send_buff读取的大小
 
     _task() {}
     _task(const _task &it)
@@ -94,7 +95,7 @@ struct _task
         socket = it.socket;
         size = it.size;
     }
-    _task(int id, int size_other)
+    _task(uint32_t id, uint32_t size_other)
     {
         socket = id;
         size = size_other;
@@ -111,7 +112,7 @@ struct _conn_t
     uint32_t dst_ip;
     _conn_t()
     {
-        conn_id = src_ip = dst_ip = -1;
+        conn_id = src_ip = dst_ip = 0;
     }
     _conn_t(uint32_t a, uint32_t b, uint32_t c)
     {
@@ -146,49 +147,49 @@ struct _conn_t
 };
 
 struct _send_state
-{ //TODO 每个套字节自己一个状态，目前由于应用场景没有多连接都是一对一先不做了
+{ // TODO 每个套字节自己一个状态，目前由于应用场景没有多连接都是一对一先不做了
     ip_packet send_window[MAX_WND_SIZE * 2];
     bool ack_window[MAX_WND_SIZE * 2];
     time_point<steady_clock> send_time[MAX_WND_SIZE * 2];
 
     CircularBuffer buff;
 
-    int last_sent;
-    int last_acked; // 上次确认过ack的发送窗口
+    std::atomic_uint32_t last_acked; // 上次确认过ack的发送窗口
+    std::atomic_uint32_t last_sent;
 
     ThreadSafeQueue<_task> tasks;
 
-    int last_seq_of_current_task;
+    uint32_t last_seq_of_current_task;
     struct _task current_task;
 
     _send_state() : buff(MAX_BUFFSIZE)
     {
         memset(ack_window, 0, sizeof(ack_window));
-        last_sent = -1; // seq从0开始
-        last_acked = -1;
+        last_sent.store(0); // seq从1开始
+        last_acked.store(0);
 
-        last_seq_of_current_task = -2;
+        last_seq_of_current_task = 0;
     }
 };
 
-struct _recv_state // TODO ack_window也算到recv_window里
+struct _recv_state
 {
     ip_packet recv_window[MAX_WND_SIZE * 2];
-    int ack_until; // 上一次累计确认的位置，收取data设置
+    uint32_t ack_until; // 上一次累计确认的位置，收取data设置
 
     CircularBuffer buff;
 
-    _recv_state() : buff(MAX_BUFFSIZE/10)
+    _recv_state() : buff(MAX_BUFFSIZE / MAX_CON_NUM)
     {
-        ack_until =-1;
+        ack_until = 0;
     }
     void close()
     {
-        ack_until = -2;
+        ack_until = 0;
     }
     void reset()
     {
-        ack_until = -1;
+        ack_until = 0;
     }
 };
 /* 每个socket对应的结构

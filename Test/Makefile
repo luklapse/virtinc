@@ -1,2 +1,2 @@
 testbuff:
-	g++ TestBuff.cpp -o testbuff -lpthread
+	g++ TestBuff.cpp -o testbuff -lpthread -Wall

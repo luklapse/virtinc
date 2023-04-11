@@ -10,7 +10,7 @@
 class CircularBuffer
 {
 public:
-    CircularBuffer(int size) : head_(0), tail_(0), empty_(true), full_(false), buffer_(size, '\0'), kBufferSize_(size) {}
+    CircularBuffer(int size) : head_(0), tail_(0), empty_(true), full_(false), kBufferSize_(size), buffer_(size, '\0') {}
     // 写入指定长度的数据到缓冲区
     int Write(const char *data, int length, int mod = 0)
     { // 读写不需要互斥，写之间需要，读直接需要互斥
@@ -24,7 +24,8 @@ public:
         std::unique_lock<std::mutex> lock(mutex_); // 获取互斥锁
         if (mod == 0)
         {
-            while (full_){
+            while (full_)
+            {
                 printf("buff write full\n");
                 not_full_.wait(lock);
             }
@@ -70,7 +71,7 @@ public:
                 memcpy(&buffer_[tail_], &data[i], len);
                 tail_ += len;
                 i += len;
-                break;//此处要么缓冲区满 要么所有数据都写入
+                break; // 此处要么缓冲区满 要么所有数据都写入
             }
         }
         empty_ = false;
@@ -88,7 +89,8 @@ public:
             length = kBufferSize_;
         std::unique_lock<std::mutex> lock(mutex_); // 获取互斥锁
 
-        while (empty_){
+        while (empty_)
+        {
             printf("buff read empty\n");
             not_empty_.wait(lock);
         }
@@ -96,7 +98,7 @@ public:
         int i = 0;
         while (i < length)
         {
-            if (tail_ <=head_ && head_ + length - i >= kBufferSize_)
+            if (tail_ <= head_ && head_ + length - i >= kBufferSize_)
             { // 复制到环形缓冲区尾部时需要分段处理
                 int len = kBufferSize_ - head_;
                 memcpy(&data[i], &buffer_[head_], len);
@@ -129,11 +131,11 @@ public:
     }
 
 private:
-    int kBufferSize_;                   // 缓冲区大小
     int head_;                          // 缓冲区头部下标
     int tail_;                          // 缓冲区尾部下标
     bool empty_;                        // 缓冲区是否为空
     bool full_;                         // 缓冲区是否已满
+    int kBufferSize_;                   // 缓冲区大小
     std::vector<char> buffer_;          // 缓冲区
     std::mutex mutex_;                  // 互斥锁
     std::condition_variable not_full_;  // 条件变量，缓冲区不满
